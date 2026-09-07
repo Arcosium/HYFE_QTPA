@@ -2,3 +2,10 @@
 연구타당성검토.docx
 발표슬라이드_순서도.png
 주차별계획.md
+실험설계_파인튜닝.md
+work/
+__pycache__/
+*.pyc
+실험일지.md
+설계확정방향.docx
+work/live/
