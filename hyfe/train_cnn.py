@@ -54,7 +54,8 @@ class Windows:
             mac = (np.c_[df.btc_r24.to_numpy() / 0.05, df.btc_r7d.to_numpy() / 0.15, df.breadth24.to_numpy() - 0.5] if mt is not None else np.zeros((len(df), 3))).astype(np.float32)
             arrs.append(np.c_[df[["o", "h", "l", "c", "v"]].to_numpy(np.float32), ctx, mac])   # 열: o h l c v vrel30 hour dow btc_r24 btc_r7d breadth24 (+ xs 3열은 아래서)
             lc = np.log(df.c.clip(lower=1e-12).to_numpy()); r1 = np.diff(lc, prepend=lc[0])
-            xs_rows.append(pd.DataFrame({"ts": df.ts.to_numpy(), "r24": lc - np.r_[np.full(bpd, lc[0]), lc[:-bpd]], "vol24": pd.Series(r1).rolling(bpd, min_periods=2).std().bfill().to_numpy(), "vrel": ctx[:, 0]}))
+            nb = bpd if bpd >= 2 else 5   # 일봉이면 "24h" 대신 5거래일 창
+            xs_rows.append(pd.DataFrame({"ts": df.ts.to_numpy(), "r24": lc - np.r_[np.full(nb, lc[0]), lc[:-nb]], "vol24": pd.Series(r1).rolling(nb, min_periods=2).std().bfill().to_numpy(), "vrel": ctx[:, 0]}))
             lw["base"] = b; lw["g"] = lw.e + off       # 전체 배열에서의 창 끝 위치
             rows.append(lw)
         arr = np.concatenate(arrs)

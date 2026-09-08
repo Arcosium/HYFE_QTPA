@@ -43,7 +43,7 @@ def setup(names):
     def one(name):
         p = f[name]
         r = sh(p, "python -m pip install --break-system-packages -q lightgbm scikit-learn pandas pyarrow pillow >/dev/null 2>&1; mkdir -p /workspace/hyfe/work/bars /workspace/hyfe/work/results; python -c 'import lightgbm,sklearn;print(1)'")
-        subprocess.run(f"rsync -az -e '{SSH} -p {p['port']}' hyfe work/universe.csv work/liq12_s0.txt work/liq12_s1.txt work/liq12_s2.txt work/liq12_s3.txt work/liq12_s4.txt work/liqwf_all.txt root@{p['ip']}:/workspace/hyfe/ && rsync -az -e '{SSH} -p {p['port']}' work/results/teacher_v1.npz work/results/teacher_v2.npz root@{p['ip']}:/workspace/hyfe/work/results/ && {SSH} -p {p['port']} root@{p['ip']} 'mv -f /workspace/hyfe/universe.csv /workspace/hyfe/liq*.txt /workspace/hyfe/work/'", shell=True)
+        subprocess.run(f"rsync -az -e '{SSH} -p {p['port']}' hyfe work/universe.csv work/liq12_s0.txt work/liq12_s1.txt work/liq12_s2.txt work/liq12_s3.txt work/liq12_s4.txt work/liqwf_all.txt work/liqkrx_s0.txt work/liqkrx_s1.txt work/liqkrx_s2.txt work/liqkrx_s3.txt work/universe_krx.csv root@{p['ip']}:/workspace/hyfe/ && rsync -az -e '{SSH} -p {p['port']}' work/results/teacher_v1.npz work/results/teacher_v2.npz root@{p['ip']}:/workspace/hyfe/work/results/ && {SSH} -p {p['port']} root@{p['ip']} 'mv -f /workspace/hyfe/universe.csv /workspace/hyfe/universe_krx.csv /workspace/hyfe/liq*.txt /workspace/hyfe/work/'", shell=True)
         return name, r.stdout.strip()[-1:] == "1"
     with ThreadPoolExecutor(8) as ex:
         for name, ok in ex.map(one, names):
@@ -61,7 +61,7 @@ def copy_from(seed_ip, seed_port, names, key="/home/arcosium/vault/HYFE_QTPA/fle
     def one(name):
         p = f[name]
         subprocess.run(f"scp -o StrictHostKeyChecking=accept-new -P {p['port']} {key} root@{p['ip']}:/root/.ssh/fleet_key", shell=True)
-        r = sh(p, f"chmod 600 /root/.ssh/fleet_key; rsync -a -e 'ssh -o StrictHostKeyChecking=accept-new -i /root/.ssh/fleet_key -p {seed_port}' root@{seed_ip}:/workspace/hyfe/work/bars/ /workspace/hyfe/work/bars/ && rsync -a -e 'ssh -o StrictHostKeyChecking=accept-new -i /root/.ssh/fleet_key -p {seed_port}' root@{seed_ip}:/workspace/hyfe/work/bars_hold/ /workspace/hyfe/work/bars_hold/ 2>/dev/null; du -sh /workspace/hyfe/work/bars | cut -f1", timeout=3600)
+        r = sh(p, f"chmod 600 /root/.ssh/fleet_key; rsync -a -e 'ssh -o StrictHostKeyChecking=accept-new -i /root/.ssh/fleet_key -p {seed_port}' root@{seed_ip}:/workspace/hyfe/work/bars/ /workspace/hyfe/work/bars/ && rsync -a -e 'ssh -o StrictHostKeyChecking=accept-new -i /root/.ssh/fleet_key -p {seed_port}' root@{seed_ip}:/workspace/hyfe/work/bars_hold/ /workspace/hyfe/work/bars_hold/ 2>/dev/null; rsync -a -e 'ssh -o StrictHostKeyChecking=accept-new -i /root/.ssh/fleet_key -p {seed_port}' root@{seed_ip}:/workspace/hyfe/work/bars_krx/ /workspace/hyfe/work/bars_krx/ 2>/dev/null; du -sh /workspace/hyfe/work/bars | cut -f1", timeout=3600)
         return name, r.stdout.strip()
     with ThreadPoolExecutor(8) as ex:
         for name, out in ex.map(one, names):
@@ -84,7 +84,7 @@ def collect(names=None):
     f = load()
     for name in names or list(f):
         p = f[name]
-        subprocess.run(f"rsync -az -e '{SSH} -p {p['port']}' --exclude '*.pt' root@{p['ip']}:/workspace/hyfe/work/results/ work/results/", shell=True)
+        subprocess.run(f"rsync -az -e '{SSH} -p {p['port']}' --include 'final_*.pt' --include 'hold_*.pt' --exclude '*.pt' root@{p['ip']}:/workspace/hyfe/work/results/ work/results/", shell=True)
 
 
 def tail(names=None, state="work/fleet_tail.json"):
