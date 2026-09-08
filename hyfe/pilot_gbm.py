@@ -141,7 +141,7 @@ def run_one(df, res, W, H, holdout, val_start, test_start, test_end, cap=300_000
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--top", type=int, default=60); ap.add_argument("--k", type=float, default=2.0)
-    ap.add_argument("--out", default="work/pilot_gbm.csv"); ap.add_argument("--configs")
+    ap.add_argument("--out", default="work/pilot_gbm.csv"); ap.add_argument("--configs"); ap.add_argument("--quarters", default="", help="분기 연속 walk-forward: ROS 시작월 A,B (예 2024-03,2025-12) → 3개월 단위 폴드 전부")
     ap.add_argument("--start", help="모든 해상도의 학습 시작월을 이 값으로(CNN 과 같은 조건으로 기준선 낼 때)")
     ap.add_argument("--cap", type=int, default=300_000); ap.add_argument("--splits", default="0,1")
     ap.add_argument("--label", default="ksigma", choices=["ksigma", "fixed", "binary", "rel", "relbin"]); ap.add_argument("--fixed", type=float, default=0.02)
@@ -162,6 +162,10 @@ def main():
         for r in START: START[r] = a.start
     PARAMS["num_threads"] = a.threads
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
+    if a.quarters:
+        q0, q1 = a.quarters.split(","); starts = pd.period_range(q0, q1, freq="M")[::3]
+        SPLITS[:] = [((p - 3).strftime("%Y-%m"), p.strftime("%Y-%m"), (p + 3).strftime("%Y-%m")) for p in starts]
+        a.splits = ",".join(str(i) for i in range(len(SPLITS))); print("quarters", SPLITS)
     use_splits = [int(s) for s in a.splits.split(",")]
     u = pd.read_csv("work/universe.csv"); u = u[u.exclude.fillna("") == ""]
     if a.liq_months:

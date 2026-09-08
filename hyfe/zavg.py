@@ -8,12 +8,15 @@ from hyfe import metrics as M
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("preds", nargs="+"); ap.add_argument("--out", required=True); ap.add_argument("--w", default="")
+    ap = argparse.ArgumentParser(); ap.add_argument("preds", nargs="+"); ap.add_argument("--out", required=True); ap.add_argument("--w", default=""); ap.add_argument("--norm_os", action="store_true", help="z 통계를 같은 폴드의 _ospred.npz 에서(사후 분포 미사용)")
     a = ap.parse_args(); w = [float(x) for x in a.w.split(",")] if a.w else [1.0] * len(a.preds)
     d = None
     for i, p in enumerate(a.preds):
         z = np.load(p, allow_pickle=True); s = z["p"][:, 1] - z["p"][:, 2]
-        t = pd.DataFrame({"ts": z["ts"], "base": z["base"].astype(str), f"s{i}": (s - s.mean()) / (s.std() + 1e-12)})
+        mu, sd = s.mean(), s.std()
+        if a.norm_os:
+            zo = np.load(p.replace("_pred.npz", "_ospred.npz"), allow_pickle=True); so = zo["p"][:, 1] - zo["p"][:, 2]; mu, sd = so.mean(), so.std()
+        t = pd.DataFrame({"ts": z["ts"], "base": z["base"].astype(str), f"s{i}": (s - mu) / (sd + 1e-12)})
         if i == 0:
             t["y"] = z["y"]; t["fwd"] = z["fwd"]; t["sigH"] = z["sigH"]
         d = t if d is None else d.merge(t, on=["ts", "base"])

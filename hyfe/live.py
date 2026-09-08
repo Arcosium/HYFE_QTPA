@@ -8,6 +8,7 @@ import argparse, glob, json, os, sys, time
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
+import torch
 from hyfe import bars as B, features as F, metrics as M
 
 HIST = B.HIST; BUF = "/home/arcosium/projects/CryptoBars/data/bars"
@@ -23,7 +24,8 @@ MS15 = 15 * 60_000; MS4H = 4 * 3_600_000
 # 방향 롱숏 장부(상대수익 relbin, 4h 격자, 상·하위 10% 를 K/2 씩 달러 중립, 보유 봉 뒤 청산). v1 = 홀드아웃 통과본, v2 = 롤링 선택 개선판(xs 피처+small/reg)
 DIR_BOOKS = {"v1": {"res": "4h", "models": ["v1_4h_W60_H42", "v1_4h_W120_H42"], "hold": 42, "K": 100},
              "v2": {"res": "4h", "models": ["v2s_4h_W60_H84", "v2r_4h_W60_H42", "v2s_4h_W120_H42"], "hold": 84, "K": 100},
-             "v2d": {"res": "1d", "models": ["v2d_1d_W20_H20"], "hold": 20, "K": 100}}   # 1d 장부는 00:00 UTC 마감에만
+             "v2d": {"res": "1d", "models": ["v2d_1d_W20_H20"], "hold": 20, "K": 100},   # 1d 장부는 00:00 UTC 마감에만
+             "cnn": {"res": "4h", "models": [], "cnn": ["final_i1_heatf_4h_W60_H84_sd0", "final_i1_heatf_4h_W60_H84_sd1", "final_i1_heatf_4h_W60_H84_sd2"], "hold": 84, "K": 100}}   # 이미지 CNN 장부(heatf, 시드 z-평균)
 
 
 def load_buffer(days=2):
@@ -228,6 +230,29 @@ def dir_tick(decision, buf, bases, st, sig, res="4h"):
     for m, (meta, booster) in metas.items():
         W = int(m.split("_W")[1].split("_")[0]); X = feat[W][meta["features"]].to_numpy(dtype=float)
         p = booster.predict(X); sc[m] = (p[:, 1] - p[:, 2] - meta["score_mean"]) / max(meta["score_std"], 1e-9)
+    for name, bk in books.items():   # 이미지 CNN 장부: 같은 4h 봉·피처(W=60)로 heatf 를 그려 CNN 시드들의 점수를 시각별 z-평균
+        if not bk.get("cnn"):
+            continue
+        try:
+            from hyfe import live_cnn as LC
+            stems = [f"work/models/{m}" for m in bk["cnn"] if os.path.exists(f"work/models/{m}.pt") and os.path.exists(f"work/models/{m}.json")]
+            if not stems or 60 not in feat:
+                continue
+            models = [LC.load_model(st_) for st_ in stems]
+            bb = {}
+            for r in rows:
+                g = recent_1m(r["base"], buf, months=2); bars_ = B.to_res(g, 240); bb[r["base"]] = bars_[bars_.ts + MS4H <= decision]
+            ctx = LC.bar_context(bb); fe = feat[60].set_index(pd.Index([r["base"] for r in rows]))
+            cols = np.zeros(len(rows))
+            for m_, meta_ in models:
+                imgs = [LC.render(ctx, r["base"], decision, fe.loc[r["base"]], meta_) for r in rows]
+                ok = np.array([im is not None for im in imgs]); s_ = np.full(len(rows), np.nan)
+                if ok.any():
+                    s_[ok] = LC.score(m_, torch.cat([im for im in imgs if im is not None]))
+                z_ = (s_ - np.nanmean(s_)) / (np.nanstd(s_) + 1e-9); cols = cols + np.nan_to_num(z_)
+            sc[name + "_score"] = cols / len(models); bk["models"] = [name + "_score"]
+        except Exception as e:
+            print("[dir cnn] error", repr(e)[:200])
     dirs = st.setdefault("dir", {})
     for name, bk in books.items():
         if any(m not in sc for m in bk["models"]):

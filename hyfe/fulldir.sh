@@ -4,9 +4,9 @@
 set -u
 cd "$(dirname "$0")/.."
 model=$1; IFS=: read res W H <<< "$2"; shift 2; folds=${*:-0 1 2 3}; tag="${res}_W${W}_H${H}"
-CAP=${CAP:-5000000}; STRIDE=${STRIDE:-1}; CHANNELS=${CHANNELS:-gray}; LABEL=${LABEL:-relbin}; NOVOL=${NOVOL:-}; DETREND=${DETREND:-}; SEQCTX=${SEQCTX:-}
-EXTRA="${LR:+--lr $LR} ${EPOCHS:+--epochs $EPOCHS} ${NOVOL:+--no_volume} ${DETREND:+--detrend} ${SEQCTX:+--seq_ctx}"
-SUF=$([ "$CHANNELS" != gray ] && echo _$CHANNELS)$([ -n "$NOVOL" ] && echo _novol)$([ -n "$DETREND" ] && echo _detrend)$([ -n "$SEQCTX" ] && echo _ctx)$([ -n "$LR" ] && echo _lr$LR)_liq
+CAP=${CAP:-5000000}; STRIDE=${STRIDE:-1}; CHANNELS=${CHANNELS:-gray}; LABEL=${LABEL:-relbin}; NOVOL=${NOVOL:-}; DETREND=${DETREND:-}; SEQCTX=${SEQCTX:-}; RENDER=${RENDER:-}; LR=${LR:-}; EPOCHS=${EPOCHS:-}; SEED=${SEED:-0}
+EXTRA="${LR:+--lr $LR} ${EPOCHS:+--epochs $EPOCHS} ${NOVOL:+--no_volume} ${DETREND:+--detrend} ${SEQCTX:+--seq_ctx} ${RENDER:+--render $RENDER} --seed $SEED"
+SUF=$([ "$CHANNELS" != gray ] && echo _$CHANNELS)$([ -n "$NOVOL" ] && echo _novol)$([ -n "$DETREND" ] && echo _detrend)$([ -n "$SEQCTX" ] && echo _ctx)$([ -n "$RENDER" ] && echo _$RENDER)$([ "$SEED" != 0 ] && echo _sd$SEED)$([ -n "$LR" ] && echo _lr$LR)_liq
 for s in $folds; do
   case $s in 0) V=2025-09; T=2025-12; TE=2026-03;; 1) V=2025-06; T=2025-09; TE=2025-12;; 2) V=2024-09; T=2024-12; TE=2025-03;; 3) V=2024-03; T=2024-06; TE=2024-09;; esac
   echo "=== FULLDIR $model$SUF $tag split$s"

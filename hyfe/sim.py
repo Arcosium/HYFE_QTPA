@@ -18,7 +18,7 @@ def load_prices(bases, res):
     return px
 
 
-def run(pred, res, H, K, cost, q, thr, side="short", fund=None, delay=1, exclude=(), shuffle=0, no_compound=False, hedge=False, regime=0):
+def run(pred, res, H, K, cost, q, thr, side="short", fund=None, delay=1, exclude=(), shuffle=0, no_compound=False, hedge=False, regime=0, xs_thr=False, thr_hi=None):
     z = np.load(pred, allow_pickle=True)
     sig = pd.DataFrame({"ts": z["ts"], "base": z["base"].astype(str), "score": M.score(z["p"])}).sort_values("ts")
     sig = sig[~sig.base.isin(set(exclude))]
@@ -33,8 +33,11 @@ def run(pred, res, H, K, cost, q, thr, side="short", fund=None, delay=1, exclude
         if shuffle:   # 대조: 경보 자체를 무작위로
             sig["ev"] = np.random.default_rng(shuffle).permutation(sig.ev.to_numpy())
         thr = float(sig.ev.quantile(1 - q)); sig = sig[sig.ev >= thr].copy(); sig["sd"] = "?"
+    elif side == "ls" and xs_thr:   # 판단 시각별 횡단면 백분위 — 그 시각에 아는 정보만으로 경계를 정한다(실전 엔진과 동일)
+        pr = sig.groupby("ts").score.rank(pct=True); sig = sig[(pr <= q) | (pr >= 1 - q)].copy()
+        sig["sd"] = np.where(pr.loc[sig.index] <= q, "short", "long"); thr = float("nan")
     elif side == "ls":
-        thr_hi = float(sig.score.quantile(1 - q)); sig = sig[(sig.score <= thr) | (sig.score >= thr_hi)].copy()
+        thr_hi = float(sig.score.quantile(1 - q)) if thr_hi is None else thr_hi; sig = sig[(sig.score <= thr) | (sig.score >= thr_hi)].copy()
         sig["sd"] = np.where(sig.score <= thr, "short", "long")
     else:
         sig = sig[sig.score <= thr] if side == "short" else sig[sig.score >= thr]; sig = sig.assign(sd=side)
@@ -125,7 +128,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred", required=True); ap.add_argument("--res", required=True); ap.add_argument("--H", type=int, required=True)
     ap.add_argument("--K", type=int, default=20); ap.add_argument("--cost", type=float, default=0.001); ap.add_argument("--q", type=float, default=0.1)
-    ap.add_argument("--thr", type=float); ap.add_argument("--side", default="short", choices=["short", "long", "ls", "follow", "fade"]); ap.add_argument("--no_fund", action="store_true"); ap.add_argument("--delay", type=int, default=1, help="진입 봉 지연(1=다음 봉 시가, 2=한 봉 더 늦게)"); ap.add_argument("--exclude_source", default="", help="예: bybit_trades — 체결 집계 상폐분 제외 민감도"); ap.add_argument("--shuffle", type=int, default=0, help="0 이 아니면 그 시드로 점수를 섞은 무작위 대조"); ap.add_argument("--no_compound", action="store_true"); ap.add_argument("--only", default="", help="매매 후보를 이 파일의 종목(한 줄 하나)으로 제한"); ap.add_argument("--hedge", action="store_true", help="같은 크기의 유니버스 지수 반대 포지션(시장 중립)"); ap.add_argument("--regime", type=int, default=0, help="N>0: BTC 직전 N일 추세가 하락일 때만 공매도(롱은 상승일 때만)")
+    ap.add_argument("--thr", type=float); ap.add_argument("--thr_hi", type=float, help="롱 경계(고정, 예: OS 분위)"); ap.add_argument("--side", default="short", choices=["short", "long", "ls", "follow", "fade"]); ap.add_argument("--no_fund", action="store_true"); ap.add_argument("--delay", type=int, default=1, help="진입 봉 지연(1=다음 봉 시가, 2=한 봉 더 늦게)"); ap.add_argument("--exclude_source", default="", help="예: bybit_trades — 체결 집계 상폐분 제외 민감도"); ap.add_argument("--shuffle", type=int, default=0, help="0 이 아니면 그 시드로 점수를 섞은 무작위 대조"); ap.add_argument("--no_compound", action="store_true"); ap.add_argument("--xs_thr", action="store_true", help="롱숏 경계를 판단 시각별 횡단면 분위로(사후 분포 미사용)"); ap.add_argument("--only", default="", help="매매 후보를 이 파일의 종목(한 줄 하나)으로 제한"); ap.add_argument("--hedge", action="store_true", help="같은 크기의 유니버스 지수 반대 포지션(시장 중립)"); ap.add_argument("--regime", type=int, default=0, help="N>0: BTC 직전 N일 추세가 하락일 때만 공매도(롱은 상승일 때만)")
     a = ap.parse_args()
     fund = None
     if not a.no_fund and os.path.exists("work/funding.parquet"):
@@ -133,9 +136,9 @@ def main():
     u = pd.read_csv("work/universe.csv"); excl = u[u.source == a.exclude_source].base.tolist() if a.exclude_source else []
     if a.only:
         keep = set(l.strip() for l in open(a.only) if l.strip()); excl = sorted(set(u.base) - keep)
-    r, daily = run(a.pred, a.res, a.H, a.K, a.cost, a.q, a.thr, a.side, fund, a.delay, excl, a.shuffle, a.no_compound, a.hedge, a.regime)
+    r, daily = run(a.pred, a.res, a.H, a.K, a.cost, a.q, a.thr, a.side, fund, a.delay, excl, a.shuffle, a.no_compound, a.hedge, a.regime, a.xs_thr, a.thr_hi)
     print(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()}, ensure_ascii=False))
-    out = a.pred.replace("_pred.npz", f"_sim_{a.side}_K{a.K}_c{a.cost}" + ("_hedge" if a.hedge else "") + (f"_reg{a.regime}" if a.regime else "") + (f"_shuf{a.shuffle}" if a.shuffle else "") + ".json")
+    out = a.pred.replace("_pred.npz", f"_sim_{a.side}_K{a.K}_c{a.cost}" + ("_hedge" if a.hedge else "") + ("_xs" if a.xs_thr else "") + ("_osthr" if a.thr_hi is not None else "") + (f"_reg{a.regime}" if a.regime else "") + (f"_shuf{a.shuffle}" if a.shuffle else "") + ".json")
     json.dump({"summary": r, "daily": {str(k.date()): float(v) for k, v in daily.items()}}, open(out, "w"), indent=1)
 
 

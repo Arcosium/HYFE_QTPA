@@ -4,8 +4,8 @@
 set -u
 cd "$(dirname "$0")/.."
 model=$1; IFS=: read res W H <<< "$2"; shift 2; folds=${*:-0 1 2 3}; tag="${res}_W${W}_H${H}"
-CAP=${CAP:-5000000}; STRIDE=${STRIDE:-0}; CHANNELS=${CHANNELS:-gray}; LABEL=${LABEL:-ksigma}; TOPN=${TOPN:-}; NOVOL=${NOVOL:-}; DETREND=${DETREND:-}; UNI=${TOPN:+--top $TOPN}; UNI=${UNI:---universe G4}; EXTRA="${LR:+--lr $LR} ${PX:+--px $PX} ${IMGH:+--img_h $IMGH} ${EPOCHS:+--epochs $EPOCHS}"
-SUF=$([ "$CHANNELS" != gray ] && echo _$CHANNELS)$([ "$LABEL" != ksigma ] && echo _$LABEL)$([ -n "$NOVOL" ] && echo _novol)$([ -n "$DETREND" ] && echo _detrend)$([ -n "$TOPN" ] && [ "$TOPN" != 200 ] && echo _top$TOPN)$([ -n "$LR" ] && echo _lr$LR)$([ -n "$PX" ] && echo _px$PX)$([ -n "$IMGH" ] && echo _h$IMGH)
+CAP=${CAP:-5000000}; STRIDE=${STRIDE:-0}; CHANNELS=${CHANNELS:-gray}; LABEL=${LABEL:-ksigma}; TOPN=${TOPN:-}; NOVOL=${NOVOL:-}; DETREND=${DETREND:-}; UNI=${TOPN:+--top $TOPN}; UNI=${UNI:---universe G4}; EXTRA="${LR:+--lr $LR} ${PX:+--px $PX} ${IMGH:+--img_h $IMGH} ${EPOCHS:+--epochs $EPOCHS} ${RENDER:+--render $RENDER}"
+SUF=$([ "$CHANNELS" != gray ] && echo _$CHANNELS)$([ "$LABEL" != ksigma ] && echo _$LABEL)$([ -n "$NOVOL" ] && echo _novol)$([ -n "$DETREND" ] && echo _detrend)$([ -n "$TOPN" ] && [ "$TOPN" != 200 ] && echo _top$TOPN)$([ -n "$LR" ] && echo _lr$LR)$([ -n "$PX" ] && echo _px$PX)$([ -n "$IMGH" ] && echo _h$IMGH)$([ -n "$RENDER" ] && echo _$RENDER)
 for s in $folds; do
   case $s in 0) V=2025-09; T=2025-12; TE=2026-03;; 1) V=2025-06; T=2025-09; TE=2025-12;; 2) V=2024-09; T=2024-12; TE=2025-03;; 3) V=2024-03; T=2024-06; TE=2024-09;; esac
   echo "=== FULL $model$SUF $tag split$s"
