@@ -25,7 +25,7 @@ MS15 = 15 * 60_000; MS4H = 4 * 3_600_000
 DIR_BOOKS = {"v1": {"res": "4h", "models": ["v1_4h_W60_H42", "v1_4h_W120_H42"], "hold": 42, "K": 100},
              "v2": {"res": "4h", "models": ["v2s_4h_W60_H84", "v2r_4h_W60_H42", "v2s_4h_W120_H42"], "hold": 84, "K": 100},
              "v2d": {"res": "1d", "models": ["v2d_1d_W20_H20"], "hold": 20, "K": 100},   # 1d 장부는 00:00 UTC 마감에만
-             "cnn": {"res": "4h", "models": [], "cnn": ["final_i1_heatf_4h_W60_H84_sd0", "final_i1_heatf_4h_W60_H84_sd1", "final_i1_heatf_4h_W60_H84_sd2"], "hold": 84, "K": 100}}   # 이미지 CNN 장부(heatf, 시드 z-평균)
+             "cnn": {"res": "4h", "models": [], "cnn": "final_i1_heatf_4h_W60_H84_sd*", "hold": 84, "K": 100}}   # 이미지 CNN 장부(heatf, 시드 z-평균)
 
 
 def load_buffer(days=2):
@@ -235,7 +235,7 @@ def dir_tick(decision, buf, bases, st, sig, res="4h"):
             continue
         try:
             from hyfe import live_cnn as LC
-            stems = [f"work/models/{m}" for m in bk["cnn"] if os.path.exists(f"work/models/{m}.pt") and os.path.exists(f"work/models/{m}.json")]
+            stems = sorted(p[:-3] for p in glob.glob(f"work/models/{bk['cnn']}.pt") if os.path.exists(p[:-3] + ".json"))   # 설치된 시드 전부(패턴)
             if not stems or 60 not in feat:
                 continue
             models = [LC.load_model(st_) for st_ in stems]
