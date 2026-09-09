@@ -228,6 +228,19 @@ class SeqTransformer(nn.Module):
         return self.fc(self.enc(self.inp(x) + self.pos).mean(1))
 
 
+class MLP(nn.Module):
+    """비이미지 대조군(심사 지적 "37개 피처를 읽은 것 아니냐"): m1 = 창 끝 피처 37개만, m2 = heatf 수치 행렬(48×60, 픽셀 복원) 전체를 펴서 MLP."""
+
+    def __init__(self, mode, n_feat, n_cls=3):
+        super().__init__(); self.mode = mode; d = n_feat if mode == "m1" else 48 * 60
+        self.net = nn.Sequential(nn.Linear(d, 256), nn.LayerNorm(256), nn.LeakyReLU(0.01), nn.Dropout(0.3), nn.Linear(256, 64), nn.LeakyReLU(0.01), nn.Linear(64, n_cls))
+
+    def forward(self, x, f=None):
+        if self.mode == "m1":
+            return self.net(f)
+        return self.net(x[:, 0, ::2, ::3].flatten(1))   # 96×180 이미지 → 48×60 수치 행렬(행 2px·봉 3px 반복을 되돌림)
+
+
 def build_model(a, W):
     c = len(CHANNEL_SETS[a.channels])
     if a.render in ("heat", "heatx", "heatf"):
@@ -235,7 +248,7 @@ def build_model(a, W):
     if a.render == "heat2":
         c = 2
     return {"i1": lambda: SmallCNN(in_ch=c), "i1f": lambda: SmallCNN(pool_w=2, in_ch=c), "i2": lambda: ResNet18(in_ch=c), "i3": lambda: ResNet18(depth=34, in_ch=c), "j2": lambda: SeqTransformer(W, in_dim=8 if a.seq_ctx else 5),
-            "f1": lambda: SmallCNN(n_feat=len(F.FEATURES), in_ch=c)}[a.model]()   # 속도 시험 결과 폭 보존(2×1 풀링)이 정확도에서 앞서 f1 도 i1 트렁크
+            "f1": lambda: SmallCNN(n_feat=len(F.FEATURES), in_ch=c), "m1": lambda: MLP("m1", len(F.FEATURES) + len(XS_FEATS)), "m2": lambda: MLP("m2", 0)}[a.model]()   # 속도 시험 결과 폭 보존(2×1 풀링)이 정확도에서 앞서 f1 도 i1 트렁크
 
 
 # ---------- 학습 ----------
@@ -265,7 +278,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--res", required=True); ap.add_argument("--W", type=int, required=True); ap.add_argument("--H", type=int, required=True)
     ap.add_argument("--k", type=float, default=2.0); ap.add_argument("--label", default="ksigma", choices=["ksigma", "fixed", "binary", "rel", "relbin"]); ap.add_argument("--stride", type=int, default=0, help="창 간격(봉), rel 라벨·앙상블 정렬용"); ap.add_argument("--fixed", type=float, default=0.02)
-    ap.add_argument("--model", default="i1", choices=["i1", "i1f", "i2", "i3", "j2", "f1"])
+    ap.add_argument("--model", default="i1", choices=["i1", "i1f", "i2", "i3", "j2", "f1", "m1", "m2"])
     ap.add_argument("--top", type=int, default=200); ap.add_argument("--bases")
     ap.add_argument("--universe", default="", help="S4 종목군 G1~G5 (평가는 전체 홀드아웃)"); ap.add_argument("--delisted", default="in", choices=["in", "out"])
     ap.add_argument("--val", default="2025-09"); ap.add_argument("--test", default="2025-12"); ap.add_argument("--test_end", default="2026-03")
@@ -328,7 +341,7 @@ def main():
     f_tr, f_va, f_te = (feat(tr), feat(va), feat(te)) if feat else (None, None, None)
 
     model = build_model(a, a.W).to(dev)
-    lr = a.lr or {"i1": 1e-3, "i1f": 1e-3, "i2": 1e-4, "i3": 1e-4, "j2": 5e-4, "f1": 1e-3}[a.model]
+    lr = a.lr or {"i1": 1e-3, "i1f": 1e-3, "i2": 1e-4, "i3": 1e-4, "j2": 5e-4, "f1": 1e-3, "m1": 1e-3, "m2": 1e-3}[a.model]
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     g_tr = torch.tensor(tr.g.to_numpy(), device=dev); y_trt = torch.tensor(y_tr, device=dev)
     t_trt = torch.tensor(tr.tscore.to_numpy(np.float32), device=dev) if a.teacher else None

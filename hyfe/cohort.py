@@ -10,7 +10,7 @@ from hyfe import bars as B, metrics as M
 from hyfe.perf import stats
 
 
-def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False):
+def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding=""):
     z = np.load(pred, allow_pickle=True)
     sig = pd.DataFrame({"ts": z["ts"], "base": z["base"].astype(str), "s": M.score(z["p"])})
     if shuffle:
@@ -22,6 +22,13 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False):
         d = pd.read_parquet(B.path(res, b), columns=["ts", "c"]); d = d[(d.ts >= t0 - bar_ms) & (d.ts <= t1)]
         px[b] = d.set_index("ts").c
     P = pd.DataFrame(px).sort_index(); grid = P.index.to_numpy(); pos = {t: i for i, t in enumerate(grid)}; A = P.to_numpy(); col = {b: j for j, b in enumerate(bases)}
+    Fm = None
+    if funding:   # 펀딩비(8h 정산) → 격자 봉별 합. 롱은 rate 를 내고 숏은 받는다. 자료 없는 종목(bybit 전용 등)은 같은 다리의 평균 펀딩을 적용(nanmean)
+        fd = pd.read_parquet(funding); fd = fd[fd.base.isin(bases) & (fd.ts >= grid[0]) & (fd.ts <= grid[-1])]
+        Fm = np.full((len(grid), len(bases)), np.nan)
+        for b, gb in fd.groupby("base"):
+            colv = np.zeros(len(grid)); np.add.at(colv, np.searchsorted(grid, gb.ts.to_numpy(), side="left").clip(0, len(grid) - 1), gb.rate.to_numpy()); Fm[:, col[b]] = colv
+        run.funding_cov = int(fd.base.nunique()); run.funding_paid = []
     pnl = np.zeros(len(grid)); nact = np.zeros(len(grid))                       # 코호트 손익 증분 합, 활성 코호트 수
     pr = sig.groupby("ts").s.rank(pct=True)
     for t, g in sig.assign(pr=pr).groupby("ts"):
@@ -37,6 +44,12 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False):
             vu = np.nanmean(V, axis=1); path = (vl - 1) - (vu - 1) - 2 * cost * np.linspace(0, 1, len(vl))
         else:
             path = 0.5 * (vl - 1) - 0.5 * (vs - 1) - 2 * cost * np.linspace(0, 1, len(vl))   # 달러 중립 코호트 손익(왕복 비용은 보유 중 선형 차감)
+        if Fm is not None:   # 보유 중 정산된 펀딩: 롱 −, 숏 + (봉 단위 누적, 다리 안 동일비중 평균)
+            with np.errstate(all="ignore"):
+                fl = np.nan_to_num(np.nanmean(Fm[i0 + 1:i1 + 1][:, L], axis=1)); fs = np.nan_to_num(np.nanmean(Fm[i0 + 1:i1 + 1][:, S], axis=1))
+            fl, fs = np.r_[0.0, np.cumsum(fl)], np.r_[0.0, np.cumsum(fs)]
+            path = path - fl if long_only else path - 0.5 * fl + 0.5 * fs
+            run.funding_paid.append((fl[-1], fs[-1]))
         pnl[i0 + 1:i1 + 1] += np.diff(path); nact[i0 + 1:i1 + 1] += 1
     act = nact > 0; r = np.where(act, pnl / np.maximum(nact, 1), 0.0)             # 활성 코호트 동일 자본 배분 → 포트폴리오 봉수익
     eq = pd.Series(np.cumprod(1 + r), index=pd.to_datetime(grid, unit="ms"))
@@ -47,9 +60,12 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--pred", required=True); ap.add_argument("--res", default="4h"); ap.add_argument("--H", type=int, required=True)
     ap.add_argument("--q", type=float, default=0.1); ap.add_argument("--cost", type=float, default=0.001); ap.add_argument("--shuffle", type=int, default=0); ap.add_argument("--lag", type=int, default=0); ap.add_argument("--long_only", action="store_true", help="롱 다리만: 상위 q 매수 − 유니버스 동일비중(초과수익). 롱온리 계좌(타임폴리오) 판정용")
-    a = ap.parse_args(); dr, daily = run(a.pred, a.res, a.H, a.q, a.cost, a.shuffle, a.long_only)
+    ap.add_argument("--funding", default="", help="펀딩비 parquet(symbol,ts,rate,base) — 보유 중 정산 펀딩을 롱 −/숏 + 로 반영. 결과 파일 접미 _fund")
+    a = ap.parse_args(); dr, daily = run(a.pred, a.res, a.H, a.q, a.cost, a.shuffle, a.long_only, a.funding)
     lag = a.lag or max(1, a.H * B.RES_MIN[a.res] // 1440)
-    st = stats(dr, daily, lag); out = a.pred.replace("_pred.npz", f"_cohort_H{a.H}" + ("_long" if a.long_only else "") + (f"_shuf{a.shuffle}" if a.shuffle else "") + ".json")
+    st = stats(dr, daily, lag); out = a.pred.replace("_pred.npz", f"_cohort_H{a.H}" + ("_long" if a.long_only else "") + (f"_shuf{a.shuffle}" if a.shuffle else "") + ("_fund" if a.funding else "") + ".json")
+    if a.funding:
+        fp = np.array(run.funding_paid); st["funding"] = {"covered_bases": run.funding_cov, "long_paid_bp_per_hold": round(float(fp[:, 0].mean() * 1e4), 2), "short_received_bp_per_hold": round(float(fp[:, 1].mean() * 1e4), 2)}
     json.dump({"summary": st, "daily": {str(k.date()): float(v) for k, v in daily.items()}}, open(out, "w"), indent=1)
     print(json.dumps(st), out)
 

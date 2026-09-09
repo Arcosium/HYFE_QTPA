@@ -12,3 +12,8 @@
 - `gbm/ens_v2_4h_s{0..3}_sim_ls_K100_c0.001*.json` — 대조군 LightGBM v2 같은 폴드의 K=100 롱숏 시뮬(`_shuf` 는 셔플)
 
 재생성: 예측 파일(`*_pred.npz`, 용량 때문에 저장소에 없음)에서 `bash hyfe/eval_seeds.sh`.
+
+## 9/9 추가 (심사 지적 반영)
+- `mlp_table.csv` — MLP 대조군(m1 피처 37, m2 heatf 수치 행렬)과 heatf CNN·LightGBM 의 코호트 Sharpe (논문 표 11). 원자료 `cohort/full_m1_*`, `cohort/full_m2_*`, `cohort/ens_m13_*`, `cohort/ens_m23_*`
+- `funding_table.csv` — 실측 펀딩비 반영 전후(시드 10 앙상블·LightGBM). 원자료 `cohort/ens_heatf10_*_fund.json`, `gbm/ens_v2_4h_s*_cohort_H84[_fund].json`
+- `liquidity_legs.csv` — 롱·숏 다리 종목의 판단 전 30일 일평균 달러 거래대금(백만 달러)
