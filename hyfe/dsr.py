@@ -38,7 +38,7 @@ def main():
     print(f"승자: 일 SR {sr:.4f} (연율 {sr*np.sqrt(365):.2f}), T {T}일, 왜도 {skew(win):.2f}, 첨도 {kurtosis(win, fisher=False):.2f}")
     print(f"시도 분포(합산): 설정 {len(pool_sh)}개, 연율 Sharpe 평균 {pool_sh.mean():.2f} 표준편차 {pool_sh.std():.2f} | 폴드 단위 {len(fold_sh)}개 표준편차 {fold_sh.std():.2f} → T 축소 {np.sqrt(v_fold)*np.sqrt(365):.2f}; 설정 수 전체 {len(stems)}, 이미지 모델 {n_img}")
     rows = []
-    for name, n in [("사전등록 시드(참고)", 10), ("캔들 22설정", 22), ("코호트 판정 설정", len(pool_sh)), ("이미지 모델 설정", n_img), ("100", 100), ("전체 설정", len(stems)), ("1000", 1000)]:
+    for name, n in [("사전등록 시드(참고)", 10), ("캔들 25설정", 25), ("코호트 판정 설정", len(pool_sh)), ("이미지 모델 설정", n_img), ("100", 100), ("전체 설정", len(stems)), ("1000", 1000)]:
         rows.append({"N": n, "기준": name, "SR0_annual": round(sr0(v_pool, n) * np.sqrt(365), 2), "DSR": round(dsr(win, v_pool, n), 4), "SR0_fold": round(sr0(v_fold, n) * np.sqrt(365), 2), "DSR_fold": round(dsr(win, v_fold, n), 4), "PSR": round(dsr(win, 0.0, 2), 4)})   # PSR = 시도 보정 없음(SR0 = 0)
     hold = daily_returns("results/cohort/ens_heatf10_hold_4h_s4_cohort_H84.json")[0]; hold = hold[hold.index < "2026-06-01"]   # 사전등록 홀드아웃(2026-03~05): 사용 2회(GBM·CNN)
     for n in (2, 22):

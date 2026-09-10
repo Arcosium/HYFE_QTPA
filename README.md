@@ -42,6 +42,21 @@ BTC 매크로 피처·평면은 두 표현 모두에서 해로움. 유니버스�
 
 ![v2 GBM 롱숏 폴드별 순자산](docs/figs/equity_v2_ls_K100.png)
 
+### 0-1. 확장 실험 (2026-09-10) — 표는 `results/ext_*.csv`, 과정은 `실험일지.md`
+
+| 실험 | 결과 | 도구 |
+|---|---|---|
+| Deflated Sharpe(시도 142설정 분산) | 시도 25 → 0.74, 107 → 0.41, 227 → 0.26, 홀드아웃(N=2) 0.79 | `hyfe/dsr.py`, `results/dsr_table.csv` |
+| 방향 CNN + 크기 발생확률 비중 | 합산 3.53 → 3.87(Δ+0.33, 블록부트 P 0.04), z-합 3.00, 1/σ 3.86 | `work/ext/stack.py`, `results/stack_table.csv` |
+| 가림·saliency(홀드아웃 창 5,000) | 평균그림 가림 Spearman: 횡단면 10행 0.62, 피처 27행 0.76, 순위 0.94, 가격 0.97 | `hyfe/saliency.py`, `results/occlusion_table_mean.csv` |
+| 배치 재학습(행 순열·봉 순열·행군 제거) | 행 순열 2.34/2.48, 봉 순열 2.75/3.16(차이 없음), 피처 27행 제거 2.13/2.18 이 최대 손실 | `results/ext_layout.csv` |
+| 반감기(보유만 변경) | 비용후 2일 1.02 → 14일 3.53 → 42일 3.12, 비용 0 도 14일 정점 | `results/ext_decay.csv` |
+| 지평·격자 재학습(시드 0~2) | 7일 2.00 · 21일 2.28 · 28일 2.75 vs 14일 3.01(홀드아웃 2.10·1.80·2.49 vs 3.30), 1h 격자 2.57 vs 2.81 | `results/ext_horizon.csv`, `ext_grid1h.csv` |
+| 용량·국면 | $10M 3.02, $100M 1.90, $300M 0.70; BTC 하락장 3.91·횡보 2.69·상승 7.10 | `work/ext/capacity.py`, `results/ext_capacity.csv`, `ext_regime.csv` |
+| 모델 변형 | z 회귀 손실 1.87/1.95(기각), 채널 1.5배 2.80/3.00(+0.2, 시드 편차 안) | `results/ext_model.csv` |
+
+시드 수를 맞춘 앙상블이 기준(시드 0~2: 3.01·홀드아웃 3.30, 시드 0·1: 2.81). 캔들 설정은 결과 파일 기준 25개(`results/candle_settings_table.csv`).
+
 ## 1. 파이프라인 전체 흐름
 
 여덟 단계로 간다. 앞 네 단계가 예측기를 만들고 뒤 네 단계가 그것을 트레이딩 머신으로
