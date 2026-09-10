@@ -11,7 +11,7 @@
  "trials_fold": 618,
  "fold_sharpe_sd": 2.1009832704486846,
  "v_fold_daily_scaled": 0.0030441930084385595,
- "n_stems": 227,
+ "n_stems": 229,
  "n_img": 107,
  "pooled_configs": [
   "dir_pbig_relbin_1d_W20_H20_cohort_H20.json",
