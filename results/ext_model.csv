@@ -1,0 +1,4 @@
+variant,n_seeds,seed_pooled_mean,seed_pooled_min,ens_sharpe,ens_p,ens_mdd,ens_folds
+기준 i1·CE(시드 0·1),2,2.6,2.29,2.81,0.0003,-4.2,1.86 · 2.69 · 3.35 · 4.3
+i1·z 회귀 손실,0,,,,,,
+i1w(채널 1.5배)·CE,0,,,,,,

@@ -10,9 +10,18 @@ from hyfe import bars as B, metrics as M
 from hyfe.perf import stats
 
 
-def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding=""):
+def wmean(X, w):
+    """다리 안 가중 평균(가중치 없으면 동일비중). 가격 결측(nan)은 가중치에서도 뺀다."""
+    return np.nanmean(X, axis=1) if w is None else np.nansum(np.nan_to_num(X) * w, axis=1) / np.maximum((~np.isnan(X) * w).sum(1), 1e-12)
+
+
+def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding="", weight=""):
     z = np.load(pred, allow_pickle=True)
     sig = pd.DataFrame({"ts": z["ts"], "base": z["base"].astype(str), "s": M.score(z["p"])})
+    Wd = None
+    if weight:   # 종목별 비중 npz(ts, base, w > 0): 다리 안에서 w 비례 배분(없는 종목은 다리 평균 w). 확장 실험 ③(급등급락 확률 가중 등)
+        zw = np.load(weight, allow_pickle=True); Wd = pd.Series(zw["w"].astype(float), index=pd.MultiIndex.from_arrays([zw["ts"], zw["base"].astype(str)]))
+        sig = sig.merge(Wd.rename("w").reset_index().rename(columns={"level_0": "ts", "level_1": "base"}), on=["ts", "base"], how="left")
     if shuffle:
         sig["s"] = np.random.default_rng(shuffle).permutation(sig.s.to_numpy())
     bases = sorted(sig.base.unique()); bar_ms = B.RES_MIN[res] * 60_000
@@ -34,12 +43,15 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding="")
     for t, g in sig.assign(pr=pr).groupby("ts"):
         if t not in pos:
             continue
-        L = [col[b] for b in g[g.pr >= 1 - q].base]; S = [col[b] for b in g[g.pr <= q].base]
+        gl, gs = g[g.pr >= 1 - q], g[g.pr <= q]; L = [col[b] for b in gl.base]; S = [col[b] for b in gs.base]
         i0 = pos[t]; i1 = min(i0 + H, len(grid) - 1)
         if not L or not S or i1 <= i0:
             continue
+        wl = ws = None
+        if Wd is not None:
+            wl, ws = (x.w.fillna(x.w.mean() if x.w.notna().any() else 1.0).to_numpy() for x in (gl, gs))
         base_px = A[i0]; V = A[i0:i1 + 1] / base_px                                     # 진입(판단봉 종가) 대비 가치 경로, 보유 중 매수 후 보유
-        vl = np.nanmean(V[:, L], axis=1); vs = np.nanmean(V[:, S], axis=1)
+        vl = wmean(V[:, L], wl); vs = wmean(V[:, S], ws)
         if long_only:   # 롱 다리 초과수익: 상위 q 동일비중 − 유니버스 동일비중(같은 시각 전 종목), 비용은 롱 다리 왕복만
             vu = np.nanmean(V, axis=1); path = (vl - 1) - (vu - 1) - 2 * cost * np.linspace(0, 1, len(vl))
         else:
@@ -61,9 +73,10 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--pred", required=True); ap.add_argument("--res", default="4h"); ap.add_argument("--H", type=int, required=True)
     ap.add_argument("--q", type=float, default=0.1); ap.add_argument("--cost", type=float, default=0.001); ap.add_argument("--shuffle", type=int, default=0); ap.add_argument("--lag", type=int, default=0); ap.add_argument("--long_only", action="store_true", help="롱 다리만: 상위 q 매수 − 유니버스 동일비중(초과수익). 롱온리 계좌(타임폴리오) 판정용")
     ap.add_argument("--funding", default="", help="펀딩비 parquet(symbol,ts,rate,base) — 보유 중 정산 펀딩을 롱 −/숏 + 로 반영. 결과 파일 접미 _fund")
-    a = ap.parse_args(); dr, daily = run(a.pred, a.res, a.H, a.q, a.cost, a.shuffle, a.long_only, a.funding)
+    ap.add_argument("--weight", default="", help="종목 비중 npz(ts,base,w) — 다리 안 w 비례 배분. 결과 파일 접미 _w<tag>"); ap.add_argument("--tag", default="", help="--weight 결과 접미")
+    a = ap.parse_args(); dr, daily = run(a.pred, a.res, a.H, a.q, a.cost, a.shuffle, a.long_only, a.funding, a.weight)
     lag = a.lag or max(1, a.H * B.RES_MIN[a.res] // 1440)
-    st = stats(dr, daily, lag); out = a.pred.replace("_pred.npz", f"_cohort_H{a.H}" + ("_long" if a.long_only else "") + (f"_shuf{a.shuffle}" if a.shuffle else "") + ("_fund" if a.funding else "") + ".json")
+    st = stats(dr, daily, lag); out = a.pred.replace("_pred.npz", f"_cohort_H{a.H}" + ("_long" if a.long_only else "") + (f"_shuf{a.shuffle}" if a.shuffle else "") + ("_fund" if a.funding else "") + (f"_w{a.tag}" if a.weight else "") + ".json")
     if a.funding:
         fp = np.array(run.funding_paid); st["funding"] = {"covered_bases": run.funding_cov, "long_paid_bp_per_hold": round(float(fp[:, 0].mean() * 1e4), 2), "short_received_bp_per_hold": round(float(fp[:, 1].mean() * 1e4), 2)}
     json.dump({"summary": st, "daily": {str(k.date()): float(v) for k, v in daily.items()}}, open(out, "w"), indent=1)

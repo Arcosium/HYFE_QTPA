@@ -26,6 +26,7 @@ def ms(month):
 # ---------- 데이터 ----------
 class Windows:
     """종목별 봉 배열을 GPU 에 올려두고 (창 끝 g) 로 창을 뽑아 렌더/정규화한다. need_feats 면 밀도 피처도 붙인다."""
+    row_perm = col_perm = drop = None   # heatf 배치 실험("왜 열지도인가"): 48행 고정 순열 · 봉(열) 고정 순열 · 행군 제거(0 채움)
 
     def __init__(self, bases, res, W, H, k, device, start="2023-01", end="2026-02", label="ksigma", fixed=0.02, need_feats=False, stride=None, macro=False):
         self.W, self.H, self.dev = W, H, device
@@ -68,6 +69,7 @@ class Windows:
             cnt = self.idx.groupby("ts").fwd.transform("size"); self.idx = self.idx[cnt >= 20].copy()
             self.idx["fwd"] = self.idx.fwd - self.idx.groupby("ts").fwd.transform("mean")
             self.idx["label"] = F.label_of(self.idx.fwd.to_numpy(), self.idx.sigH.to_numpy(), k, "binary" if label == "relbin" else "ksigma", fixed)
+            self.idx["z"] = (self.idx.fwd / (self.idx.groupby("ts").fwd.transform("std") + 1e-9)).clip(-3, 3).astype(np.float32)   # --loss zreg 목표(횡단면 z)
 
     def window(self, g):
         ar = torch.arange(self.W, device=self.dev)
@@ -100,6 +102,12 @@ class Windows:
         rows = hx[:, ::(IMG_H // 11)][:, :11]                               # 원래 11행으로 되돌림
         fr = torch.sigmoid(f / 2.0)[:, :, None].expand(-1, -1, hx.shape[-1])  # (B,37,Wp)
         img = torch.cat([rows, fr], 1); n = img.shape[1]
+        if self.drop is not None:
+            img[:, self.drop] = 0.0
+        if self.row_perm is not None:
+            img = img[:, self.row_perm]
+        if self.col_perm is not None:   # 봉 순서를 섞는다(PX 픽셀 묶음 단위) — 정보량은 같고 시간 순서만 파괴
+            B_ = img.shape[0]; img = img.view(B_, n, self.W, PX)[:, :, self.col_perm].reshape(B_, n, self.W * PX)
         img = img.repeat_interleave(max(IMG_H // n, 1), 1); pad = IMG_H - img.shape[1]
         if pad > 0:
             img = torch.cat([img, torch.zeros(img.shape[0], pad, img.shape[2], device=img.device)], 1)
@@ -179,21 +187,21 @@ class Windows:
 class SmallCNN(nn.Module):
     """JKX 형: (5×3 conv → BN → LeakyReLU → 2×1 maxpool) × 3 → 풀링 → FC. n_feat>0 이면 f1 융합."""
 
-    def __init__(self, n_cls=3, n_feat=0, pool_w=1, in_ch=1):
-        """pool_w=2 (i1f): 풀링을 2×2 로 해 폭도 줄인다 — 360px 폭 이미지에서 연산 약 8배 절감. in_ch: 다채널 이미지"""
+    def __init__(self, n_cls=3, n_feat=0, pool_w=1, in_ch=1, width=1.0):
+        """pool_w=2 (i1f): 풀링을 2×2 로 해 폭도 줄인다 — 360px 폭 이미지에서 연산 약 8배 절감. in_ch: 다채널 이미지. width: 채널 배수(i1w=1.5)"""
         super().__init__()
-        ch = [in_ch, 64, 128, 256]
+        ch = [in_ch] + [int(c * width) for c in (64, 128, 256)]
         self.blocks = nn.Sequential(*[nn.Sequential(
             nn.Conv2d(ch[i], ch[i + 1], (5, 3), padding=(2, 1)), nn.BatchNorm2d(ch[i + 1]), nn.LeakyReLU(0.01), nn.MaxPool2d((2, pool_w)))
             for i in range(3)])
         self.pool = nn.AdaptiveAvgPool2d((6, 30))
         self.n_feat = n_feat
         if n_feat:
-            self.img_fc = nn.Sequential(nn.Flatten(), nn.Dropout(0.5), nn.Linear(256 * 6 * 30, 128), nn.LeakyReLU(0.01))
+            self.img_fc = nn.Sequential(nn.Flatten(), nn.Dropout(0.5), nn.Linear(ch[3] * 6 * 30, 128), nn.LeakyReLU(0.01))
             self.feat_fc = nn.Sequential(nn.Linear(n_feat, 64), nn.LeakyReLU(0.01))
             self.head = nn.Linear(128 + 64, n_cls)
         else:
-            self.fc = nn.Sequential(nn.Flatten(), nn.Dropout(0.5), nn.Linear(256 * 6 * 30, n_cls))
+            self.fc = nn.Sequential(nn.Flatten(), nn.Dropout(0.5), nn.Linear(ch[3] * 6 * 30, n_cls))
 
     def forward(self, x, f=None):
         z = self.pool(self.blocks(x))
@@ -247,7 +255,7 @@ def build_model(a, W):
         c = 1
     if a.render == "heat2":
         c = 2
-    return {"i1": lambda: SmallCNN(in_ch=c), "i1f": lambda: SmallCNN(pool_w=2, in_ch=c), "i2": lambda: ResNet18(in_ch=c), "i3": lambda: ResNet18(depth=34, in_ch=c), "j2": lambda: SeqTransformer(W, in_dim=8 if a.seq_ctx else 5),
+    return {"i1": lambda: SmallCNN(in_ch=c), "i1w": lambda: SmallCNN(in_ch=c, width=1.5), "i1f": lambda: SmallCNN(pool_w=2, in_ch=c), "i2": lambda: ResNet18(in_ch=c), "i3": lambda: ResNet18(depth=34, in_ch=c), "j2": lambda: SeqTransformer(W, in_dim=8 if a.seq_ctx else 5),
             "f1": lambda: SmallCNN(n_feat=len(F.FEATURES), in_ch=c), "m1": lambda: MLP("m1", len(F.FEATURES) + len(XS_FEATS)), "m2": lambda: MLP("m2", 0)}[a.model]()   # 속도 시험 결과 폭 보존(2×1 풀링)이 정확도에서 앞서 f1 도 i1 트렁크
 
 
@@ -267,7 +275,7 @@ def predict(model, wins, g, f, a, bs=512):
         x, ff = inputs(wins, g[i:i + bs], None if f is None else f[i:i + bs], a)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             o = model(x, ff).float()
-        if getattr(a, "teacher", ""):
+        if getattr(a, "teacher", "") or getattr(a, "loss", "ce") == "zreg":
             sc = o[:, 1] - o[:, 2]; out.append(torch.stack([torch.zeros_like(sc), sc.clamp(min=0), (-sc).clamp(min=0)], 1).cpu())
         else:
             out.append(torch.softmax(o, 1).cpu())
@@ -278,7 +286,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--res", required=True); ap.add_argument("--W", type=int, required=True); ap.add_argument("--H", type=int, required=True)
     ap.add_argument("--k", type=float, default=2.0); ap.add_argument("--label", default="ksigma", choices=["ksigma", "fixed", "binary", "rel", "relbin"]); ap.add_argument("--stride", type=int, default=0, help="창 간격(봉), rel 라벨·앙상블 정렬용"); ap.add_argument("--fixed", type=float, default=0.02)
-    ap.add_argument("--model", default="i1", choices=["i1", "i1f", "i2", "i3", "j2", "f1", "m1", "m2"])
+    ap.add_argument("--model", default="i1", choices=["i1", "i1w", "i1f", "i2", "i3", "j2", "f1", "m1", "m2"])
+    ap.add_argument("--row_perm", type=int, default=0, help="heatf 48행 고정 순열(난수 시드) — 같은 정보·다른 배치"); ap.add_argument("--col_perm", type=int, default=0, help="heatf 봉 순서 고정 순열(난수 시드) — 시간 순서 파괴")
+    ap.add_argument("--drop", default="", choices=["", "price", "vol", "time", "rank", "feat27", "xs10"], help="heatf 행군 제거(0 채움)"); ap.add_argument("--loss", default="ce", choices=["ce", "zreg"], help="zreg: 횡단면 z 수익 회귀(relbin 라벨 필요)")
     ap.add_argument("--top", type=int, default=200); ap.add_argument("--bases")
     ap.add_argument("--universe", default="", help="S4 종목군 G1~G5 (평가는 전체 홀드아웃)"); ap.add_argument("--delisted", default="in", choices=["in", "out"])
     ap.add_argument("--val", default="2025-09"); ap.add_argument("--test", default="2025-12"); ap.add_argument("--test_end", default="2026-03")
@@ -312,6 +322,10 @@ def main():
     if a.render == "heatf":
         from hyfe.pilot_gbm import add_xs
         ix = add_xs(ix); wins.idx = ix
+        G = {"price": range(0, 4), "vol": (4, 5), "time": (6, 7), "rank": range(8, 11), "feat27": range(11, 38), "xs10": range(38, 48)}   # heatf 행 배치
+        wins.drop = torch.tensor(list(G[a.drop]), device=dev) if a.drop else None
+        wins.row_perm = torch.tensor(np.random.default_rng(a.row_perm).permutation(48), device=dev) if a.row_perm else None
+        wins.col_perm = torch.tensor(np.random.default_rng(a.col_perm).permutation(a.W), device=dev) if a.col_perm else None
     if a.teacher:   # 교사(피처 GBM 의 표본 밖 점수)를 (ts, base) 로 붙인다. 없는 행은 학습에서 제외
         tz = np.load(a.teacher, allow_pickle=True); tdf = pd.DataFrame({"ts": tz["ts"], "base": tz["base"].astype(str), "tscore": tz["score"].astype(np.float32)})
         if a.teacher_xs:
@@ -341,10 +355,11 @@ def main():
     f_tr, f_va, f_te = (feat(tr), feat(va), feat(te)) if feat else (None, None, None)
 
     model = build_model(a, a.W).to(dev)
-    lr = a.lr or {"i1": 1e-3, "i1f": 1e-3, "i2": 1e-4, "i3": 1e-4, "j2": 5e-4, "f1": 1e-3, "m1": 1e-3, "m2": 1e-3}[a.model]
+    lr = a.lr or {"i1": 1e-3, "i1w": 1e-3, "i1f": 1e-3, "i2": 1e-4, "i3": 1e-4, "j2": 5e-4, "f1": 1e-3, "m1": 1e-3, "m2": 1e-3}[a.model]
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     g_tr = torch.tensor(tr.g.to_numpy(), device=dev); y_trt = torch.tensor(y_tr, device=dev)
     t_trt = torch.tensor(tr.tscore.to_numpy(np.float32), device=dev) if a.teacher else None
+    z_trt = torch.tensor(tr.z.to_numpy(np.float32), device=dev) if a.loss == "zreg" else None
     t_va = va.tscore.to_numpy(np.float32) if a.teacher else None
     g_va = torch.tensor(va.g.to_numpy(), device=dev); g_te = torch.tensor(te.g.to_numpy(), device=dev)
     best, best_state, bad, hist = -1, None, 0, []
@@ -358,11 +373,13 @@ def main():
                 if a.teacher and a.tail_w > 0:
                     w_ = 1.0 + a.tail_w * (t_trt[j].abs() > 1.0).float(); loss = (w_ * (o[:, 1] - o[:, 2] - t_trt[j]) ** 2).sum() / w_.sum()
                 else:
-                    loss = Fn.mse_loss(o[:, 1] - o[:, 2], t_trt[j]) if a.teacher else Fn.cross_entropy(o, y_trt[j])
+                    loss = Fn.mse_loss(o[:, 1] - o[:, 2], t_trt[j]) if a.teacher else Fn.mse_loss(o[:, 1] - o[:, 2], z_trt[j]) if a.loss == "zreg" else Fn.cross_entropy(o, y_trt[j])
             opt.zero_grad(set_to_none=True); loss.backward(); opt.step(); tl += loss.item() * len(j)
         pv = predict(model, wins, g_va, f_va, a); r = M.evaluate(va.label.to_numpy(), pv, va.fwd.to_numpy(), va.sigH.to_numpy())
         if a.teacher:   # 조기종료 = 검증 구간에서 교사 점수와의 상관(높을수록 좋음)
             m_ = ~np.isnan(t_va); sv = pv[:, 1] - pv[:, 2]; r["ap"] = float(np.corrcoef(sv[m_], t_va[m_])[0, 1]) if m_.sum() > 100 else 0.0
+        elif a.loss == "zreg":   # 회귀 점수는 확률이 아니라 AP 가 무의미 → 검증 spread_z 로 조기종료
+            r["ap"] = float(r.get("spread_z") or 0.0)
         hist.append({"epoch": ep, "loss": tl / len(perm), "val_ap": r["ap"], "val_spread_z": r.get("spread_z"), "sec": round(time.time() - te0)})
         print(f"ep{ep} loss {tl/len(perm):.4f} val_{'corr' if a.teacher else 'ap'} {r['ap']:.4f} spread_z {r.get('spread_z', float('nan')):.3f} {time.time()-te0:.0f}s", flush=True)
         if r["ap"] > best:

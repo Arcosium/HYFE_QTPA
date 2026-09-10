@@ -1,0 +1,3 @@
+variant,n_seeds,seed_pooled_mean,seed_pooled_min,ens_sharpe,ens_p,ens_mdd,ens_folds
+4h·60·84 기준(시드 0·1),2,2.6,2.29,2.81,0.0003,-4.2,1.86 · 2.69 · 3.35 · 4.3
+1h·240·336 (같은 10일 창·14일 지평),0,,,,,,

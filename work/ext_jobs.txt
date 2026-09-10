@@ -1,0 +1,27 @@
+# 확장 실험 일감(9/10) — 한 줄 = pod 하나. 기준선 = heatf i1 4h·60·84 시드 0~9(이미 있음). 폴드 1회 ≈ 24분, 홀드아웃 ≈ 35분, 1h 폴드 ≈ 2.5시간(추정)
+# ① 왜 열지도인가: 행 순열(rp) · 봉 순열(cp) · 행군 제거(drop)
+RENDER=heatf SEED=0 ROWPERM=1 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=1 ROWPERM=2 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+RENDER=heatf SEED=2 ROWPERM=3 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 COLPERM=1 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+RENDER=heatf SEED=1 COLPERM=2 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=2 COLPERM=3 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+# ④ 보유 지평 스윕(4h): H42·H126 은 시드 0 결과가 있어 시드 1·2, H168 은 시드 0~2
+RENDER=heatf SEED=1 bash hyfe/fulldir.sh i1 4h:60:42 0 1 2 3; RENDER=heatf SEED=2 bash hyfe/fulldir.sh i1 4h:60:42 0 1 2 3
+RENDER=heatf SEED=1 bash hyfe/fulldir.sh i1 4h:60:126 0 1 2 3; RENDER=heatf SEED=2 bash hyfe/fulldir.sh i1 4h:60:126 0 1 2 3
+RENDER=heatf SEED=0 bash hyfe/fulldir.sh i1 4h:60:168 0 1 2 3; RENDER=heatf SEED=1 bash hyfe/fulldir.sh i1 4h:60:168 0 1 2 3
+RENDER=heatf SEED=2 bash hyfe/fulldir.sh i1 4h:60:168 0 1 2 3; RENDER=heatf SEED=0 DROP=price bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+# ① 행군 제거 계속
+RENDER=heatf SEED=1 DROP=price bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 DROP=vol bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+RENDER=heatf SEED=1 DROP=vol bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 DROP=rank bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+RENDER=heatf SEED=1 DROP=rank bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 DROP=feat27 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+RENDER=heatf SEED=1 DROP=feat27 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 DROP=xs10 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+# ⑧ z 회귀 손실 · 넓은 CNN(i1w)
+RENDER=heatf SEED=1 DROP=xs10 bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 LOSS=zreg bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+RENDER=heatf SEED=1 LOSS=zreg bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3; RENDER=heatf SEED=0 bash hyfe/fulldir.sh i1w 4h:60:84 0 1 2 3
+# ④ 홀드아웃(2026-03~08 학습본, 논문은 03~05 만 사용) — 지평별 시드 0~2
+RENDER=heatf SEED=1 bash hyfe/fulldir.sh i1w 4h:60:84 0 1 2 3; H=42 SEED=0 bash hyfe/hold.sh; H=42 SEED=1 bash hyfe/hold.sh
+H=42 SEED=2 bash hyfe/hold.sh; H=126 SEED=0 bash hyfe/hold.sh; H=126 SEED=1 bash hyfe/hold.sh; H=126 SEED=2 bash hyfe/hold.sh
+H=168 SEED=0 bash hyfe/hold.sh; H=168 SEED=1 bash hyfe/hold.sh; H=168 SEED=2 bash hyfe/hold.sh; RENDER=heatf SEED=0 DROP=time bash hyfe/fulldir.sh i1 4h:60:84 0 1 2 3
+# ④ 격자 1h(창 240봉=10일, 지평 336봉=14일, 판단은 4봉마다 = 4h 와 같은 시각)
+RENDER=heatf STRIDE=4 SEED=0 bash hyfe/fulldir.sh i1 1h:240:336 0 1
+RENDER=heatf STRIDE=4 SEED=0 bash hyfe/fulldir.sh i1 1h:240:336 2 3
+RENDER=heatf STRIDE=4 SEED=1 bash hyfe/fulldir.sh i1 1h:240:336 0 1
+RENDER=heatf STRIDE=4 SEED=1 bash hyfe/fulldir.sh i1 1h:240:336 2 3
