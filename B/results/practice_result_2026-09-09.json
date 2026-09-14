@@ -1,0 +1,121 @@
+{
+  "config": {
+    "purpose": "교육용 1회 학습. 공식 740종목/4h/14일 결과의 재현 아님",
+    "bases": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "DOGE"
+    ],
+    "res": "15m",
+    "W": 120,
+    "H": 10,
+    "k": 2.0,
+    "stride": 1,
+    "seed": 0,
+    "val_start": "2026-07-30",
+    "test_start": "2026-08-15",
+    "test_end": "2026-09-01",
+    "excluded_sample_bases": {
+      "AGIX": "거래량 전부 0",
+      "WAVES": "0거래량 다수 및 거래소 혼재. 첫 실습 범위에서 제외"
+    },
+    "holdout_symbols": [],
+    "missing_minute_policy": "팀 bars.py와 같은 종가 forward fill/volume=0. 품질 문제는 별도 기록",
+    "comparison_limit": "단기 연습표본. 미학습 종목 평가·매매비용·전략 수익 검증 없음",
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "min_data_in_leaf": 200,
+    "max_rounds": 600,
+    "early_stopping_rounds": 50
+  },
+  "splits": [
+    {
+      "split": "IS",
+      "rows": 9664,
+      "first_bar_open_utc": "2026-07-03 11:30:00+00:00",
+      "last_bar_open_utc": "2026-07-28 15:15:00+00:00",
+      "last_label_available_utc": "2026-07-28 18:00:00+00:00",
+      "labels": {
+        "0": 9059,
+        "1": 307,
+        "2": 298
+      }
+    },
+    {
+      "split": "OS",
+      "rows": 5624,
+      "first_bar_open_utc": "2026-07-30 00:00:00+00:00",
+      "last_bar_open_utc": "2026-08-13 15:15:00+00:00",
+      "last_label_available_utc": "2026-08-13 18:00:00+00:00",
+      "labels": {
+        "0": 5323,
+        "1": 139,
+        "2": 162
+      }
+    },
+    {
+      "split": "practice_test",
+      "rows": 6488,
+      "first_bar_open_utc": "2026-08-15 00:00:00+00:00",
+      "last_bar_open_utc": "2026-08-31 21:15:00+00:00",
+      "last_label_available_utc": "2026-09-01 00:00:00+00:00",
+      "labels": {
+        "0": 5986,
+        "1": 356,
+        "2": 146
+      }
+    }
+  ],
+  "elapsed_seconds": 0.91,
+  "source_metrics": {
+    "n_train": 9664,
+    "n_val": 5624,
+    "n_test": 6488,
+    "best_iter": 5,
+    "val_ap_up": 0.04622393730420375,
+    "val_prev_up": 0.024715504978662872,
+    "val_ap_dn": 0.0386544013288614,
+    "val_prev_dn": 0.028805120910384067,
+    "val_ap": 0.04243916931653258,
+    "val_prev": 0.026760312944523468,
+    "val_lift": 1.5858995896091643,
+    "val_spread": -0.0005977976864415709,
+    "val_spread_z": -0.15613736062567724,
+    "val_hit_top": 0.4389380530973451,
+    "val_hit_bot": 0.5805309734513274,
+    "test_ap_up": 0.131905436687198,
+    "test_prev_up": 0.054870530209617754,
+    "test_ap_dn": 0.03148617628467343,
+    "test_prev_dn": 0.02250308261405672,
+    "test_ap": 0.08169580648593572,
+    "test_prev": 0.038686806411837235,
+    "test_lift": 2.111722679206179,
+    "test_spread": 0.0010196855076691723,
+    "test_spread_z": 0.36050372163058597,
+    "test_hit_top": 0.5591397849462365,
+    "test_hit_bot": 0.4252696456086287,
+    "top_feats": "dow,hour,vol_W,maq_maW,rng_mean"
+  },
+  "independent_AP_check": {
+    "up": {
+      "AP": 0.131905436687198,
+      "prevalence": 0.054870530209617754,
+      "AP_over_prevalence": 2.4039395315352268,
+      "matches_saved_metric": true
+    },
+    "dn": {
+      "AP": 0.03148617628467343,
+      "prevalence": 0.02250308261405672,
+      "AP_over_prevalence": 1.399193915992885,
+      "matches_saved_metric": true
+    }
+  },
+  "library_versions": {
+    "python": "3.12.14",
+    "lightgbm": "4.7.0",
+    "numpy": "2.3.5",
+    "pandas": "3.0.1"
+  },
+  "source_commit": "ef98dacbb1294af43923b143f9474ec03df8f9cc"
+}
