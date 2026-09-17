@@ -270,6 +270,8 @@ def inputs(wins, g, f, a):
 
 @torch.no_grad()
 def predict(model, wins, g, f, a, bs=512):
+    if not len(g):
+        return np.empty((0, 3), dtype=np.float32)
     model.eval(); out = []
     for i in range(0, len(g), bs):
         x, ff = inputs(wins, g[i:i + bs], None if f is None else f[i:i + bs], a)
@@ -299,6 +301,7 @@ def main():
     ap.add_argument("--channels", default="gray", choices=list(CHANNEL_SETS), help="gray 1채널(JKX) · c2 차트+밀도 · c3 +시각 · multi 5채널(+30일 거래량·요일)")
     ap.add_argument("--px", type=int, default=3, help="봉당 픽셀 폭"); ap.add_argument("--img_h", type=int, default=96, help="이미지 높이")
     ap.add_argument("--out", required=True); ap.add_argument("--save_pred", action="store_true")
+    ap.add_argument("--final", action="store_true", help="deployment fit: train/validation only, immutable as-of bar snapshot required")
     ap.add_argument("--teacher", default="", help="증류: 교사 점수 npz(ts, base, score). 학생은 이미지에서 교사 점수를 회귀(MSE)로 배운다"); ap.add_argument("--teacher_xs", action="store_true", help="교사 점수를 판단 시각별로 z-정규화(순수 횡단면 목표)"); ap.add_argument("--tail_w", type=float, default=0.0, help="증류 손실 꼬리 가중: |교사 z|>1 인 행에 1+K 배(십분위 양끝을 더 정확히)")
     a = ap.parse_args()
     torch.manual_seed(a.seed); np.random.seed(a.seed)
@@ -340,6 +343,12 @@ def main():
         tr = tr[tr.tscore.notna()]
     va = ix[seen & (ix.ts >= ms(a.val)) & (ix.ts < ms(a.test) - emb)]
     te = ix[(ix.ts >= ms(a.test)) & (ix.ts < ms(a.test_end))]
+    if a.final:
+        if a.test != a.test_end or int(wins.arr.shape[0]) == 0:
+            raise ValueError("final training requires test == test_end (no test-period selection)")
+        te = ix.iloc[:0]
+    if tr.empty or va.empty or (not a.final and te.empty):
+        raise ValueError("empty train/validation/test split")
     if len(tr) > a.cap:
         tr = tr.sample(a.cap, random_state=a.seed)
     y_tr = tr.label.to_numpy().copy()
@@ -394,7 +403,7 @@ def main():
     ev = lambda d, p: M.evaluate(d.label.to_numpy(), p, d.fwd.to_numpy(), d.sigH.to_numpy())
     res = {"args": vars(a), "n_train": len(tr), "n_val": len(va), "n_test": len(te), "n_unseen": int(un.sum()), "hist": hist,
            "feat_cols": (FEATS if feat else None), "feat_mu": (mu.tolist() if feat else None), "feat_sd": (sd.tolist() if feat else None),   # 실전 추론용 표준화 통계
-           "val": ev(va, pv), "test": ev(te[~un], pt[~un]), "unseen": ev(te[un], pt[un]) if un.sum() > 500 else None,
+           "val": ev(va, pv), "test": ev(te[~un], pt[~un]) if len(te[~un]) else None, "unseen": ev(te[un], pt[un]) if un.sum() > 500 else None,
            "sec": round(time.time() - t0)}
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     json.dump(res, open(a.out, "w"), indent=1)

@@ -5,22 +5,26 @@ import argparse
 import numpy as np
 import pandas as pd
 from hyfe import metrics as M
+from hyfe.paper_rules import ensemble
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("preds", nargs="+"); ap.add_argument("--out", required=True); ap.add_argument("--w", default=""); ap.add_argument("--norm_os", action="store_true", help="z 통계를 같은 폴드의 _ospred.npz 에서(사후 분포 미사용)")
+    ap = argparse.ArgumentParser(); ap.add_argument("preds", nargs="+"); ap.add_argument("--out", required=True); ap.add_argument("--w", default=""); ap.add_argument("--norm_os", action="store_true", help="legacy GBM comparison only: fixed validation statistics")
     a = ap.parse_args(); w = [float(x) for x in a.w.split(",")] if a.w else [1.0] * len(a.preds)
     d = None
     for i, p in enumerate(a.preds):
         z = np.load(p, allow_pickle=True); s = z["p"][:, 1] - z["p"][:, 2]
-        mu, sd = s.mean(), s.std()
+        mu, sd = 0.0, 1.0
         if a.norm_os:
             zo = np.load(p.replace("_pred.npz", "_ospred.npz"), allow_pickle=True); so = zo["p"][:, 1] - zo["p"][:, 2]; mu, sd = so.mean(), so.std()
         t = pd.DataFrame({"ts": z["ts"], "base": z["base"].astype(str), f"s{i}": (s - mu) / (sd + 1e-12)})
         if i == 0:
             t["y"] = z["y"]; t["fwd"] = z["fwd"]; t["sigH"] = z["sigH"]
         d = t if d is None else d.merge(t, on=["ts", "base"])
-    s = sum(w[i] * d[f"s{i}"] for i in range(len(a.preds))) / sum(w)
+    if a.norm_os:
+        s = sum(w[i] * d[f"s{i}"] for i in range(len(a.preds))) / sum(w)
+    else:
+        s = ensemble(d, [f"s{i}" for i in range(len(a.preds))], w)
     p = np.c_[np.zeros(len(d)), s.clip(lower=0), (-s).clip(lower=0)]
     np.savez_compressed(a.out, ts=d.ts.to_numpy(), base=d.base.to_numpy().astype(str), y=d.y.to_numpy(), p=p, fwd=d.fwd.to_numpy(), sigH=d.sigH.to_numpy())
     r = M.evaluate(d.y.to_numpy(), p, d.fwd.to_numpy(), d.sigH.to_numpy())

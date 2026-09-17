@@ -8,11 +8,12 @@ import numpy as np
 import pandas as pd
 from hyfe import bars as B, metrics as M
 from hyfe.perf import stats
+from hyfe.paper_rules import leg_mean, select_legs, cohort_path
 
 
 def wmean(X, w):
     """다리 안 가중 평균(가중치 없으면 동일비중). 가격 결측(nan)은 가중치에서도 뺀다."""
-    return np.nanmean(X, axis=1) if w is None else np.nansum(np.nan_to_num(X) * w, axis=1) / np.maximum((~np.isnan(X) * w).sum(1), 1e-12)
+    return leg_mean(X, w)
 
 
 def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding="", weight=""):
@@ -23,7 +24,8 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding="",
         zw = np.load(weight, allow_pickle=True); Wd = pd.Series(zw["w"].astype(float), index=pd.MultiIndex.from_arrays([zw["ts"], zw["base"].astype(str)]))
         sig = sig.merge(Wd.rename("w").reset_index().rename(columns={"level_0": "ts", "level_1": "base"}), on=["ts", "base"], how="left")
     if shuffle:
-        sig["s"] = np.random.default_rng(shuffle).permutation(sig.s.to_numpy())
+        rng = np.random.default_rng(shuffle)
+        sig["s"] = sig.groupby("ts").s.transform(lambda x: rng.permutation(x.to_numpy()))
     bases = sorted(sig.base.unique()); bar_ms = B.RES_MIN[res] * 60_000
     t0, t1 = sig.ts.min(), sig.ts.max() + (H + 2) * bar_ms
     px = {}
@@ -39,11 +41,11 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding="",
             colv = np.zeros(len(grid)); np.add.at(colv, np.searchsorted(grid, gb.ts.to_numpy(), side="left").clip(0, len(grid) - 1), gb.rate.to_numpy()); Fm[:, col[b]] = colv
         run.funding_cov = int(fd.base.nunique()); run.funding_paid = []
     pnl = np.zeros(len(grid)); nact = np.zeros(len(grid))                       # 코호트 손익 증분 합, 활성 코호트 수
-    pr = sig.groupby("ts").s.rank(pct=True)
-    for t, g in sig.assign(pr=pr).groupby("ts"):
+    for t, g in sig.groupby("ts"):
         if t not in pos:
             continue
-        gl, gs = g[g.pr >= 1 - q], g[g.pr <= q]; L = [col[b] for b in gl.base]; S = [col[b] for b in gs.base]
+        lm, sm = select_legs(g.s, q)
+        gl, gs = g[lm], g[sm]; L = [col[b] for b in gl.base]; S = [col[b] for b in gs.base]
         i0 = pos[t]; i1 = min(i0 + H, len(grid) - 1)
         if not L or not S or i1 <= i0:
             continue
@@ -55,10 +57,10 @@ def run(pred, res, H, q=0.1, cost=0.001, shuffle=0, long_only=False, funding="",
         if long_only:   # 롱 다리 초과수익: 상위 q 동일비중 − 유니버스 동일비중(같은 시각 전 종목), 비용은 롱 다리 왕복만
             vu = np.nanmean(V, axis=1); path = (vl - 1) - (vu - 1) - 2 * cost * np.linspace(0, 1, len(vl))
         else:
-            path = 0.5 * (vl - 1) - 0.5 * (vs - 1) - 2 * cost * np.linspace(0, 1, len(vl))   # 달러 중립 코호트 손익(왕복 비용은 보유 중 선형 차감)
+            path = cohort_path(V[:, L], V[:, S], wl, ws, cost, H)
         if Fm is not None:   # 보유 중 정산된 펀딩: 롱 −, 숏 + (봉 단위 누적, 다리 안 동일비중 평균)
             with np.errstate(all="ignore"):
-                fl = np.nan_to_num(np.nanmean(Fm[i0 + 1:i1 + 1][:, L], axis=1)); fs = np.nan_to_num(np.nanmean(Fm[i0 + 1:i1 + 1][:, S], axis=1))
+                fl = np.nan_to_num(leg_mean(Fm[i0 + 1:i1 + 1][:, L], wl)); fs = np.nan_to_num(leg_mean(Fm[i0 + 1:i1 + 1][:, S], ws))
             fl, fs = np.r_[0.0, np.cumsum(fl)], np.r_[0.0, np.cumsum(fs)]
             path = path - fl if long_only else path - 0.5 * fl + 0.5 * fs
             run.funding_paid.append((fl[-1], fs[-1]))

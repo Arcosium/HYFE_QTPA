@@ -3,4 +3,10 @@
 cd /home/arcosium/projects/HYFE_QTPA || exit 1
 mkdir -p work/live
 export HYFE_BARS=work/bars_hold
-/usr/bin/flock -n work/live/tick.lock /usr/bin/python3 -m hyfe.live tick >> work/live/tick.log 2>&1
+(
+  /usr/bin/flock -n 9 || exit 0
+  if [ -f work/paper_trade/enabled.json ]; then
+    OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 /usr/bin/python3 -m hyfe.paper_live >> work/paper_trade/worker.log 2>&1
+  fi
+  /usr/bin/python3 -m hyfe.live tick >> work/live/tick.log 2>&1
+) 9>work/live/tick.lock

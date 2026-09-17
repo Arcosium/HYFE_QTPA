@@ -17,8 +17,11 @@ def main():
     ap.add_argument("--label", default="ksigma"); ap.add_argument("--stride", type=int, default=0); ap.add_argument("--xs", action="store_true")
     ap.add_argument("--preset", default="base", choices=list(PRESETS)); ap.add_argument("--liq_months", type=int, default=0); ap.add_argument("--top", type=int, default=200)
     ap.add_argument("--tag", default="", help="모델 파일 접두(예: v2)")
+    ap.add_argument("--bases", default="", help="fixed as-of universe, comma list or @file")
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True); PARAMS["num_threads"] = a.threads; PARAMS.update(PRESETS[a.preset])
     u = pd.read_csv("work/universe.csv"); u = u[u.exclude.fillna("") == ""]; bases = u.base.tolist()
+    if a.bases:
+        bases = [x.strip() for x in open(a.bases[1:]) if x.strip()] if a.bases.startswith("@") else a.bases.split(",")
     if a.liq_months:
         bases = liq_top(bases, a.cutoff, a.liq_months, a.top)
     feats = list(F.FEATURES) + (XS_FEATS if a.xs else [])
