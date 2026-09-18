@@ -6,7 +6,6 @@ work/paper_trade (a vault symlink). The web reads an allowlisted view of SQLite.
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -16,7 +15,7 @@ import pandas as pd
 import torch
 
 from hyfe import bars as B, live_cnn as LC
-from hyfe.live import load_buffer, recent_1m, latest_features, liquid_bases
+from hyfe.live import load_buffer, recent_1m, liquid_bases
 from hyfe.pilot_gbm import add_xs
 from hyfe.paper_rules import STEP_MS, ensemble
 from hyfe.paper_models import RUNTIME, ROOT, bootstrap, atomic_json, validate_manifest
@@ -36,22 +35,49 @@ def mark_prices(bars, close):
 
 def infer(decision, bases, minute_data, manifest):
     """Same closed data boundary for every seed, feature and event prediction."""
+    four, quarter = {}, {}
+    for base in bases:
+        raw = minute_data.get(base)
+        if raw is None or raw.empty or int(raw.ts.iloc[-1]) < decision - 60_000:
+            continue
+        four[base] = B.to_res(raw, 240)
+        quarter[base] = B.to_res(raw, 15)
+    return infer_bars(decision, bases, four, quarter, manifest)
+
+
+def closed_features(bars, res, W, H, decision):
+    """The live feature window, with synthetic label padding only after close."""
+    from hyfe import features as F
+    step = B.RES_MIN[res] * 60_000
+    if bars is None:
+        return None
+    bars = bars[bars.ts + step <= decision]
+    if len(bars) < W + 2:
+        return None
+    b30 = max(W, 30 * 1440 // B.RES_MIN[res])
+    bars = bars.tail(b30 + W + 5).reset_index(drop=True)
+    pad = pd.concat([bars.iloc[[-1]]] * H, ignore_index=True)
+    pad["ts"] = bars.ts.iloc[-1] + step * np.arange(1, H + 1)
+    f = F.make(pd.concat([bars, pad], ignore_index=True), W, H, stride=1, bars_per_30d=b30)
+    f = f[f.ts == bars.ts.iloc[-1]]
+    return f.iloc[-1] if len(f) else None
+
+
+def infer_bars(decision, bases, four, quarter, manifest, loaded_models=None, event_model=None):
+    """Shared live/replay inference; preaggregated inputs are clipped at close."""
     import lightgbm as lgb
     from hyfe import features as F
     rows, bb = [], {}
     event_rows = []
     for base in bases:
-        raw = minute_data.get(base)
-        if raw is None or raw.empty or int(raw.ts.iloc[-1]) < decision - 60_000:
-            continue
-        bars = B.to_res(raw, 240)
+        bars = four.get(base)
         if bars is None:
             continue
         bars = bars[bars.ts + STEP_MS <= decision]
         if len(bars) < 242 or int(bars.ts.iloc[-1]) + STEP_MS != decision:
             continue
-        feat = latest_features(raw, "4h", 60, 84, decision)
-        event = latest_features(raw, "15m", 120, 10, decision)
+        feat = closed_features(bars, "4h", 60, 84, decision)
+        event = closed_features(quarter.get(base), "15m", 120, 10, decision)
         if feat is None or event is None or int(feat.ts) + STEP_MS != decision or int(event.ts) + 900_000 != decision:
             continue
         rows.append({**feat.to_dict(), "base": base, "ts": decision, "entry": float(bars.c.iloc[-1])})
@@ -61,10 +87,11 @@ def infer(decision, bases, minute_data, manifest):
         raise ValueError(f"only {len(rows)} fresh complete symbols")
     frame = add_xs(pd.DataFrame(rows))
     ctx = LC.bar_context(bb)
+    contexts = dict(tuple(ctx.groupby("base", sort=False)))
     columns = []
-    for item in manifest["models"]:
-        model, meta = LC.load_model(item["stem"])
-        images = [LC.render(ctx, row.base, decision, row, meta) for _, row in frame.iterrows()]
+    for i, item in enumerate(manifest["models"]):
+        model, meta = LC.load_model(item["stem"]) if loaded_models is None else loaded_models[i]
+        images = [LC.render(contexts[row.base], row.base, decision, row, meta) for _, row in frame.iterrows()]
         if any(im is None or not torch.isfinite(im).all() for im in images):
             raise ValueError("invalid heatf image")
         values = np.concatenate([LC.score(model, torch.cat(images[i:i + 16])) for i in range(0, len(images), 16)])
@@ -73,7 +100,7 @@ def infer(decision, bases, minute_data, manifest):
         columns.append(col)
     frame["score"] = ensemble(frame, columns)
     event_path = manifest["event_model"]["path"]
-    booster = lgb.Booster(model_file=event_path)
+    booster = lgb.Booster(model_file=event_path) if event_model is None else event_model
     probabilities = booster.predict(np.stack(event_rows), num_threads=2)
     frame["event"] = probabilities[:, 1] + probabilities[:, 2]
     frame["event_decision_ms"] = decision
@@ -141,18 +168,6 @@ def tick(runtime=RUNTIME, dry=False, now_ms=None):
             con.close()
 
 
-def schedule_training(runtime=RUNTIME):
-    """A separate lock/process prevents training from delaying the paper clock."""
-    runtime = Path(runtime)
-    statusfile = runtime / "training_status.json"
-    if statusfile.exists() and time.time() - statusfile.stat().st_mtime < 3500:
-        return
-    with (runtime / "training_worker.log").open("a") as out:
-        subprocess.Popen([sys.executable, "-m", "hyfe.paper_models", "--run"], cwd=ROOT,
-                         env=dict(os.environ, OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4"),
-                         stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry", action="store_true")
@@ -160,8 +175,6 @@ if __name__ == "__main__":
     os.chdir(ROOT)
     try:
         print(json.dumps(tick(dry=args.dry), ensure_ascii=False), flush=True)
-        if not args.dry and (RUNTIME / "enabled.json").exists():
-            schedule_training()
     except Exception as exc:
         print(json.dumps({"status": "error", "error": str(exc)[:300]}, ensure_ascii=False), flush=True)
         sys.exit(1)

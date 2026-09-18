@@ -178,6 +178,9 @@ def prepare_snapshot(dest, bases, buffer, cutoff_ms):
 def retrain(runtime=RUNTIME, run=False):
     """Low-cost scheduler check; busy hardware leaves the existing model intact."""
     runtime = Path(runtime)
+    policy = runtime / "enabled.json"
+    if policy.exists() and json.loads(policy.read_text()).get("model_policy") == "frozen":
+        return {"status": "disabled", "reason": "frozen_existing_release"}
     plan = training_plan()
     active = bootstrap(runtime)
     release = "quarterly-" + plan["data_cutoff"][:10]

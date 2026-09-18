@@ -181,6 +181,21 @@ class FundingTests(unittest.TestCase):
 
 
 class TrainingTests(unittest.TestCase):
+    def test_frozen_release_blocks_training_even_when_resources_are_ready(self):
+        with tempfile.TemporaryDirectory() as root, \
+             patch("hyfe.paper_models.resource_status", return_value={"ready": True}), \
+             patch("hyfe.paper_models.bootstrap") as bootstrap, \
+             patch("hyfe.paper_models.subprocess.run") as run:
+            root = Path(root)
+            (root/"enabled.json").write_text('{"model_policy":"frozen"}')
+            (root/"active_models.json").write_text('{"version":"existing-paper-models"}')
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            result = retrain(root, run=True)
+            self.assertEqual(result["status"], "disabled")
+            bootstrap.assert_not_called()
+            run.assert_not_called()
+            self.assertEqual({p.name: p.read_bytes() for p in root.iterdir()}, before)
+
     def test_fixed_splits_mature_labels_and_quarter_rollover(self):
         p = training_plan("2026-09-17T12:00:00Z")
         self.assertEqual(p["data_cutoff"][:10], "2026-09-01")
